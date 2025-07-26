@@ -4,11 +4,12 @@
   <title>Browser Info Collector</title>
 </head>
 <body>
-  <h1>Collecting browser data...</h1>
-  <pre id="status">Loading...</pre>
+  <h1>Browser Info Collector</h1>
+  <button onclick="sendData()">Send My Info</button>
+  <pre id="output">Click the button to send your data.</pre>
 
   <script>
-    async function collectAndSend() {
+    async function sendData() {
       const data = {
         userAgent: navigator.userAgent,
         language: navigator.language,
@@ -16,12 +17,10 @@
         cookiesEnabled: navigator.cookieEnabled,
         screen: {
           width: screen.width,
-          height: screen.height,
+          height: screen.height
         },
         time: new Date().toISOString()
       };
-
-      document.getElementById("status").textContent = JSON.stringify(data, null, 2);
 
       try {
         const response = await fetch("/collect", {
@@ -29,13 +28,14 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(data)
         });
-        console.log(await response.text());
-      } catch (err) {
-        console.error("Error sending data:", err);
+
+        const result = await response.json();
+        document.getElementById("output").textContent = "✅ Data Sent:\n" + JSON.stringify(data, null, 2);
+      } catch (error) {
+        document.getElementById("output").textContent = "❌ Failed to send data.";
+        console.error("Error:", error);
       }
     }
-
-    collectAndSend();
   </script>
 </body>
 </html>
