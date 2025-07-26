@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -6,13 +6,9 @@ from typing import List
 
 app = FastAPI()
 
-# Serve static files (frontend)
-app.mount("/", StaticFiles(directory="app/static", html=True), name="static")
-
-# In-memory database
+# In-memory storage
 browser_data_storage: List[dict] = []
 
-# Data model
 class BrowserData(BaseModel):
     userAgent: str
     language: str
@@ -21,17 +17,18 @@ class BrowserData(BaseModel):
     screen: dict
     time: str
 
-# Data collector
 @app.post("/collect")
 async def collect(data: BrowserData):
     browser_data_storage.append(data.dict())
     return {"status": "success", "count": len(browser_data_storage)}
 
-# Admin view
 @app.get("/view", response_class=HTMLResponse)
 async def view():
     html = "<h2>Submitted Browser Data</h2><ul>"
     for item in browser_data_storage:
         html += f"<li><pre>{item}</pre></li>"
     html += "</ul>"
-    return html
+    return HTMLResponse(content=html)
+
+# 🔥 This MUST be defined LAST
+app.mount("/", StaticFiles(directory="app/static", html=True), name="static")
