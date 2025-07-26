@@ -5,9 +5,37 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Advanced System Information Collector</title>
-    <script src="https://openfpcdn.io/fingerprintjs/v4"></script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@fingerprintjs/fingerprintjs@3/dist/fp.min.js"></script>
+    <!-- Primary and fallback FingerprintJS scripts -->
+    <script>
+        // Utility function to load scripts with fallback
+        function loadFingerprintScript() {
+            return new Promise((resolve, reject) => {
+                // Try loading the first script
+                const script1 = document.createElement('script');
+                script1.src = "https://cdn.jsdelivr.net/npm/@fingerprintjs/fingerprintjs@3/dist/fp.min.js";
+                script1.onload = resolve;
+                script1.onerror = () => {
+                    console.log("Primary CDN failed, trying first fallback...");
+                    // If first script fails, try the second option
+                    const script2 = document.createElement('script');
+                    script2.src = "https://unpkg.com/@fingerprintjs/fingerprintjs@3/dist/fp.min.js";
+                    script2.onload = resolve;
+                    script2.onerror = () => {
+                        console.log("Second CDN failed, trying final fallback...");
+                        // If second script fails, try the third option
+                        const script3 = document.createElement('script');
+                        script3.src = "https://openfpcdn.io/fingerprintjs/v4";
+                        script3.onload = resolve;
+                        script3.onerror = reject;
+                        document.head.appendChild(script3);
+                    };
+                    document.head.appendChild(script2);
+                };
+                document.head.appendChild(script1);
+            });
+        }
+    </script>
     <style>
         * {
             box-sizing: border-box;
@@ -830,6 +858,14 @@
 
         async function getFingerprintJS() {
             try {
+                // Try to load the script first
+                await loadFingerprintScript();
+                
+                // Check if FingerprintJS is loaded
+                if (typeof FingerprintJS === 'undefined') {
+                    throw new Error('FingerprintJS failed to load');
+                }
+
                 const fp = await FingerprintJS.load();
                 const result = await fp.get();
                 return {
@@ -840,7 +876,11 @@
                     )
                 };
             } catch (error) {
-                return { error: error.message };
+                console.error('FingerprintJS error:', error);
+                return { 
+                    error: error.message,
+                    status: 'Failed to load FingerprintJS'
+                };
             }
         }
 

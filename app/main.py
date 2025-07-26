@@ -1,10 +1,9 @@
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Dict, Any, List
 from datetime import datetime
-import os
 import json
 
 app = FastAPI()
@@ -12,7 +11,7 @@ app = FastAPI()
 # In-memory storage
 browser_data_storage: List[dict] = []
 
-# Pydantic model to match full structure of `collectedInfo` from the frontend
+# Pydantic model to match frontend data structure
 class BrowserData(BaseModel):
     meta: Dict[str, Any]
     basicinfo: Dict[str, Any]
@@ -33,21 +32,26 @@ class BrowserData(BaseModel):
     localips: Any
     fingerprintjs: Dict[str, Any]
 
+# Endpoint to receive data from client
 @app.post("/collect")
 async def collect(data: BrowserData):
     entry = data.dict()
     entry["server_received_time"] = datetime.utcnow().isoformat()
     browser_data_storage.append(entry)
-
     return {"status": "success", "count": len(browser_data_storage)}
 
+# Endpoint to serve the viewer HTML
 @app.get("/view", response_class=HTMLResponse)
 async def view():
-    html = "<h2>Submitted Browser Data (In-Memory)</h2><ul>"
-    for item in browser_data_storage:
-        html += f"<li><pre>{json.dumps(item, indent=2)}</pre></li>"
-    html += "</ul>"
-    return HTMLResponse(content=html)
+    return FileResponse("app/static/view.html")
 
-# Serve static files (your index.html must be in app/static)
+# Endpoint to return JSON data for viewer
+@app.get("/data")
+async def get_data():
+    return JSONResponse(content=browser_data_storage)
+
+# Mount static assets (HTML)
 app.mount("/", StaticFiles(directory="app/static", html=True), name="static")
+
+# Mount JS separately
+app.mount("/js", StaticFiles(directory="app/static"), name="js")
