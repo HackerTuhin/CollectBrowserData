@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: fastapi-app
+    name: collect-browser-data
     env: python
     plan: free
     buildCommand: ""

@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Browser Info Collector</title>
+</head>
+<body>
+  <h1>Collecting browser data...</h1>
+  <pre id="status">Loading...</pre>
+
+  <script>
+    async function collectAndSend() {
+      const data = {
+        userAgent: navigator.userAgent,
+        language: navigator.language,
+        platform: navigator.platform,
+        cookiesEnabled: navigator.cookieEnabled,
+        screen: {
+          width: screen.width,
+          height: screen.height,
+        },
+        time: new Date().toISOString()
+      };
+
+      document.getElementById("status").textContent = JSON.stringify(data, null, 2);
+
+      try {
+        const response = await fetch("/collect", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data)
+        });
+        console.log(await response.text());
+      } catch (err) {
+        console.error("Error sending data:", err);
+      }
+    }
+
+    collectAndSend();
+  </script>
+</body>
+</html>
