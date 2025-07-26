@@ -1,41 +1,770 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Browser Info Collector</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced System Information Collector</title>
+    <script src="https://openfpcdn.io/fingerprintjs/v4"></script>
+    <style>
+        * { box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', Arial, sans-serif; 
+            margin: 0; padding: 20px; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh; color: #333;
+        }
+        .container { 
+            max-width: 1200px; margin: 0 auto; 
+            background: white; border-radius: 12px; 
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .header { 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white; padding: 20px; text-align: center;
+        }
+        .content { padding: 20px; }
+        .status { 
+            padding: 10px; border-radius: 6px; margin: 10px 0;
+            font-weight: bold; text-align: center;
+        }
+        .status.loading { background: #fff3cd; color: #856404; }
+        .status.success { background: #d4edda; color: #155724; }
+        .status.error { background: #f8d7da; color: #721c24; }
+        .info-grid { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px; margin: 20px 0;
+        }
+        .info-card { 
+            background: #f8f9fa; border-radius: 8px; 
+            padding: 15px; border-left: 4px solid #667eea;
+        }
+        .info-card h3 { margin: 0 0 10px 0; color: #495057; }
+        .info-data { 
+            background: #ffffff; border-radius: 4px; 
+            padding: 10px; font-family: 'Courier New', monospace;
+            font-size: 12px; max-height: 200px; overflow-y: auto;
+            border: 1px solid #dee2e6;
+        }
+        .controls { 
+            display: flex; gap: 10px; flex-wrap: wrap;
+            justify-content: center; margin: 20px 0;
+        }
+        button { 
+            padding: 12px 24px; border: none; border-radius: 6px;
+            font-size: 14px; font-weight: bold; cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .btn-primary { background: #667eea; color: white; }
+        .btn-primary:hover { background: #5a6fd8; }
+        .btn-success { background: #28a745; color: white; }
+        .btn-success:hover { background: #218838; }
+        .progress { 
+            width: 100%; height: 4px; background: #e9ecef;
+            border-radius: 2px; overflow: hidden; margin: 10px 0;
+        }
+        .progress-bar { 
+            height: 100%; background: #667eea;
+            transition: width 0.3s ease;
+        }
+        @media (max-width: 768px) {
+            .container { margin: 10px; border-radius: 8px; }
+            .content { padding: 15px; }
+            .controls { flex-direction: column; align-items: center; }
+            button { width: 100%; max-width: 300px; }
+        }
+    </style>
 </head>
 <body>
-  <h1>Browser Info Collector</h1>
-  <button onclick="sendData()">Send My Info</button>
-  <pre id="output">Click the button to send your data.</pre>
+    <div class="container">
+        <div class="header">
+            <h1>🔍 Advanced Browesr Scanner</h1>
+            <p>Comprehensive device and browser fingerprinting</p>
+        </div>
+        
+        <div class="content">
+            <div id="status" class="status loading">
+                🔄 Initializing system scan...
+            </div>
+            
+            <div class="progress">
+                <div id="progressBar" class="progress-bar" style="width: 0%"></div>
+            </div>
+            
+            <div class="controls">
+                <button class="btn-primary" onclick="startCollection()">🔄 Click to Scan Browser Compatibility </button>
+                <button class="btn-success" onclick="downloadJSON()">📥 Download JSON</button>
+            </div>
+            
+            <div id="infoContainer" class="info-grid"></div>
+        </div>
+    </div>
 
-  <script>
-    async function sendData() {
-      const data = {
+<script>
+let collectedInfo = {};
+let websocket = null;
+const SESSION_KEY = 'advanced_session_id';
+
+// Utility functions
+function updateStatus(message, type = 'loading') {
+    const statusEl = document.getElementById('status');
+    statusEl.textContent = message;
+    statusEl.className = `status ${type}`;
+}
+
+function updateProgress(percent) {
+    document.getElementById('progressBar').style.width = `${percent}%`;
+}
+
+function getOrCreateSessionID() {
+    let id = localStorage.getItem(SESSION_KEY);
+    if (!id) {
+        id = crypto.randomUUID();
+        localStorage.setItem(SESSION_KEY, id);
+    }
+    return id;
+}
+
+function safeStringify(obj) {
+    const seen = new WeakSet();
+    return JSON.stringify(obj, function(key, value) {
+        if (typeof value === 'function') return '[Function]';
+        if (typeof value === 'object' && value !== null) {
+            if (seen.has(value)) return '[Circular]';
+            seen.add(value);
+        }
+        if (typeof value === 'undefined') return null;
+        return value;
+    }, 2);
+}
+
+function detectPlatform() {
+    const ua = navigator.userAgent;
+    if (/Android/i.test(ua)) return 'Android';
+    if (/iPhone|iPad|iPod/i.test(ua)) return 'iOS';
+    if (/Windows/i.test(ua)) return 'Windows';
+    if (/Mac/i.test(ua)) return 'macOS';
+    if (/Linux/i.test(ua)) return 'Linux';
+    return 'Unknown';
+}
+
+function isMobile() {
+    return /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+}
+
+function checkFeatureSupport() {
+    return {
+        battery: 'getBattery' in navigator,
+        geolocation: 'geolocation' in navigator,
+        webrtc: 'RTCPeerConnection' in window,
+        mediaDevices: 'mediaDevices' in navigator,
+        clipboard: 'clipboard' in navigator,
+        notifications: 'Notification' in window,
+        webgl: !!document.createElement('canvas').getContext('webgl'),
+        localStorage: typeof Storage !== 'undefined',
+        indexedDB: 'indexedDB' in window,
+        serviceWorker: 'serviceWorker' in navigator,
+        pushManager: 'PushManager' in window,
+        webAssembly: typeof WebAssembly === 'object'
+    };
+}
+
+// Advanced detection functions
+async function detectFonts() {
+    const baseFonts = ['monospace', 'sans-serif', 'serif'];
+    const testFonts = [
+        'Arial', 'Arial Black', 'Comic Sans MS', 'Courier New', 'Georgia', 
+        'Helvetica', 'Impact', 'Lucida Console', 'Lucida Sans Unicode',
+        'Palatino Linotype', 'Tahoma', 'Times New Roman', 'Trebuchet MS',
+        'Verdana', 'Microsoft Sans Serif', 'Calibri', 'Cambria', 'Consolas',
+        'Franklin Gothic Medium', 'Segoe UI', 'Apple Gothic', 'Menlo'
+    ];
+    
+    const testString = 'mmmmmmmmmmlli';
+    const testSize = '72px';
+    const h = document.getElementsByTagName('body')[0];
+    
+    const s = document.createElement('span');
+    s.style.fontSize = testSize;
+    s.innerHTML = testString;
+    const defaultWidth = {};
+    const defaultHeight = {};
+    
+    for (const baseFont of baseFonts) {
+        s.style.fontFamily = baseFont;
+        h.appendChild(s);
+        defaultWidth[baseFont] = s.offsetWidth;
+        defaultHeight[baseFont] = s.offsetHeight;
+        h.removeChild(s);
+    }
+    
+    const detected = [];
+    for (const font of testFonts) {
+        let detected_font = false;
+        for (const baseFont of baseFonts) {
+            s.style.fontFamily = font + ',' + baseFont;
+            h.appendChild(s);
+            const matched = (s.offsetWidth != defaultWidth[baseFont] || s.offsetHeight != defaultHeight[baseFont]);
+            h.removeChild(s);
+            detected_font = detected_font || matched;
+        }
+        if (detected_font) {
+            detected.push(font);
+        }
+    }
+    return detected;
+}
+
+async function getCanvasFingerprint() {
+    try {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        const text = 'Device fingerprinting 🔍 123 ABC xyz';
+        ctx.textBaseline = 'top';
+        ctx.font = '14px Arial';
+        ctx.fillStyle = '#f60';
+        ctx.fillRect(125, 1, 62, 20);
+        ctx.fillStyle = '#069';
+        ctx.fillText(text, 2, 15);
+        ctx.fillStyle = 'rgba(102, 204, 0, 0.7)';
+        ctx.fillText(text, 4, 17);
+        
+        return canvas.toDataURL();
+    } catch {
+        return 'Unavailable';
+    }
+}
+
+async function getWebGLFingerprint() {
+    try {
+        const canvas = document.createElement('canvas');
+        const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+        
+        if (!gl) return { status: 'Unavailable' };
+        
+        const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+        const result = {
+            vendor: gl.getParameter(gl.VENDOR),
+            renderer: gl.getParameter(gl.RENDERER),
+            version: gl.getParameter(gl.VERSION),
+            shadingLanguageVersion: gl.getParameter(gl.SHADING_LANGUAGE_VERSION),
+            extensions: gl.getSupportedExtensions(),
+            maxTextures: gl.getParameter(gl.MAX_TEXTURE_IMAGE_UNITS),
+            maxVertexTextures: gl.getParameter(gl.MAX_VERTEX_TEXTURE_IMAGE_UNITS),
+            maxRenderBufferSize: gl.getParameter(gl.MAX_RENDERBUFFER_SIZE),
+            maxViewportSize: gl.getParameter(gl.MAX_VIEWPORT_DIMS)
+        };
+        
+        if (debugInfo) {
+            result.unmaskedVendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
+            result.unmaskedRenderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+        }
+        
+        return result;
+    } catch {
+        return { status: 'Unavailable' };
+    }
+}
+
+async function getAudioFingerprint() {
+    try {
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = audioContext.createOscillator();
+        const analyser = audioContext.createAnalyser();
+        const gainNode = audioContext.createGain();
+        const scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+        
+        oscillator.type = 'triangle';
+        oscillator.frequency.setValueAtTime(10000, audioContext.currentTime);
+        
+        gainNode.gain.setValueAtTime(0, audioContext.currentTime);
+        oscillator.connect(analyser);
+        analyser.connect(scriptProcessor);
+        scriptProcessor.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        oscillator.start(0);
+        
+        return new Promise((resolve) => {
+            scriptProcessor.onaudioprocess = function(bins) {
+                bins = bins.inputBuffer.getChannelData(0);
+                let fingerprint = 0;
+                for (let i = 0; i < bins.length; i++) {
+                    fingerprint += Math.abs(bins[i]);
+                }
+                oscillator.stop();
+                audioContext.close();
+                resolve(fingerprint.toString());
+            };
+        });
+    } catch {
+        return 'Unavailable';
+    }
+}
+
+async function getNetworkInfo() {
+    try {
+        const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+        if (!conn) return { status: 'Unavailable' };
+        
+        return {
+            type: conn.type,
+            effectiveType: conn.effectiveType,
+            downlink: conn.downlink,
+            rtt: conn.rtt,
+            saveData: conn.saveData
+        };
+    } catch {
+        return { status: 'Unavailable' };
+    }
+}
+
+async function getLocalIPs() {
+    try {
+        return new Promise((resolve) => {
+            const ips = new Set();
+            const pc = new RTCPeerConnection({
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' }
+                ]
+            });
+            
+            pc.createDataChannel('');
+            pc.createOffer().then(offer => pc.setLocalDescription(offer));
+            
+            const timeout = setTimeout(() => {
+                pc.close();
+                resolve([...ips]);
+            }, 3000);
+            
+            pc.onicecandidate = (event) => {
+                if (!event || !event.candidate) return;
+                
+                const ipRegex = /([0-9]{1,3}(\.[0-9]{1,3}){3})/;
+                const ipMatch = ipRegex.exec(event.candidate.candidate);
+                
+                if (ipMatch) {
+                    ips.add(ipMatch[1]);
+                }
+                
+                if (event.candidate.candidate === '') {
+                    clearTimeout(timeout);
+                    pc.close();
+                    resolve([...ips]);
+                }
+            };
+        });
+    } catch {
+        return ['Unavailable'];
+    }
+}
+
+async function getBatteryInfo() {
+    try {
+        if (!('getBattery' in navigator)) return { status: 'Not supported' };
+        const battery = await navigator.getBattery();
+        return {
+            level: battery.level,
+            charging: battery.charging,
+            chargingTime: battery.chargingTime,
+            dischargingTime: battery.dischargingTime
+        };
+    } catch {
+        return { status: 'Unavailable' };
+    }
+}
+
+async function getGeolocation() {
+    try {
+        return new Promise((resolve) => {
+            const timeout = setTimeout(() => {
+                resolve({ status: 'Timeout' });
+            }, 5000);
+            
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    clearTimeout(timeout);
+                    resolve({
+                        latitude: position.coords.latitude,
+                        longitude: position.coords.longitude,
+                        accuracy: position.coords.accuracy,
+                        altitude: position.coords.altitude,
+                        altitudeAccuracy: position.coords.altitudeAccuracy,
+                        heading: position.coords.heading,
+                        speed: position.coords.speed,
+                        timestamp: position.timestamp
+                    });
+                },
+                (error) => {
+                    clearTimeout(timeout);
+                    resolve({ status: `Error: ${error.message}` });
+                },
+                { enableHighAccuracy: true, timeout: 4000, maximumAge: 0 }
+            );
+        });
+    } catch {
+        return { status: 'Unavailable' };
+    }
+}
+
+async function getMediaDevices() {
+    try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        return devices.map(device => ({
+            kind: device.kind,
+            label: device.label || 'Device (permissions required)',
+            deviceId: device.deviceId,
+            groupId: device.groupId
+        }));
+    } catch {
+        return { status: 'Unavailable' };
+    }
+}
+
+async function getPermissions() {
+    const permissions = {};
+    const permissionNames = [
+        'camera', 'microphone', 'geolocation', 'notifications',
+        'push', 'clipboard-read', 'clipboard-write'
+    ];
+    
+    for (const permission of permissionNames) {
+        try {
+            if ('permissions' in navigator) {
+                const result = await navigator.permissions.query({ name: permission });
+                permissions[permission] = result.state;
+            } else {
+                permissions[permission] = 'API not supported';
+            }
+        } catch {
+            permissions[permission] = 'Unavailable';
+        }
+    }
+    
+    return permissions;
+}
+
+async function getStorageInfo() {
+    const storage = {};
+    
+    try {
+        if ('storage' in navigator && 'estimate' in navigator.storage) {
+            const estimate = await navigator.storage.estimate();
+            storage.quota = estimate.quota;
+            storage.usage = estimate.usage;
+            storage.available = estimate.quota - estimate.usage;
+        }
+    } catch {
+        storage.storageAPI = 'Unavailable';
+    }
+    
+    // Local storage test
+    try {
+        localStorage.setItem('storage_test', 'test');
+        localStorage.removeItem('storage_test');
+        storage.localStorage = 'Available';
+    } catch {
+        storage.localStorage = 'Unavailable';
+    }
+    
+    // Session storage test
+    try {
+        sessionStorage.setItem('storage_test', 'test');
+        sessionStorage.removeItem('storage_test');
+        storage.sessionStorage = 'Available';
+    } catch {
+        storage.sessionStorage = 'Unavailable';
+    }
+    
+    // IndexedDB test
+    try {
+        const request = indexedDB.open('test_db', 1);
+        storage.indexedDB = 'Available';
+        request.onsuccess = () => request.result.close();
+    } catch {
+        storage.indexedDB = 'Unavailable';
+    }
+    
+    return storage;
+}
+
+async function getCPUBenchmark() {
+    try {
+        const start = performance.now();
+        let result = 0;
+        
+        // Simple CPU benchmark
+        for (let i = 0; i < 100000; i++) {
+            result += Math.sqrt(i) * Math.sin(i);
+        }
+        
+        const end = performance.now();
+        return {
+            executionTime: end - start,
+            result: result,
+            performance: end - start < 50 ? 'Fast' : end - start < 100 ? 'Medium' : 'Slow'
+        };
+    } catch {
+        return { status: 'Unavailable' };
+    }
+}
+
+// Main collection function
+async function gatherSystemInfo() {
+    updateStatus('🔄 Starting comprehensive system scan...', 'loading');
+    updateProgress(0);
+    
+    const info = {
+        meta: {
+            sessionID: getOrCreateSessionID(),
+            timestamp: new Date().toISOString(),
+            platform: detectPlatform(),
+            isMobile: isMobile(),
+            featureSupport: checkFeatureSupport(),
+            collectionVersion: '2.0'
+        }
+    };
+    
+    const tasks = [
+        { name: 'Basic Info', fn: () => getBasicInfo() },
+        { name: 'Screen Info', fn: () => getScreenInfo() },
+        { name: 'Browser Info', fn: () => getBrowserInfo() },
+        { name: 'Hardware Info', fn: () => getHardwareInfo() },
+        { name: 'Network Info', fn: () => getNetworkInfo() },
+        { name: 'Font Detection', fn: () => detectFonts() },
+        { name: 'Canvas Fingerprint', fn: () => getCanvasFingerprint() },
+        { name: 'WebGL Info', fn: () => getWebGLFingerprint() },
+        { name: 'Audio Fingerprint', fn: () => getAudioFingerprint() },
+        { name: 'Battery Info', fn: () => getBatteryInfo() },
+        { name: 'Geolocation', fn: () => getGeolocation() },
+        { name: 'Media Devices', fn: () => getMediaDevices() },
+        { name: 'Permissions', fn: () => getPermissions() },
+        { name: 'Storage Info', fn: () => getStorageInfo() },
+        { name: 'CPU Benchmark', fn: () => getCPUBenchmark() },
+        { name: 'Local IPs', fn: () => getLocalIPs() },
+        { name: 'FingerprintJS', fn: () => getFingerprintJS() }
+    ];
+    
+    for (let i = 0; i < tasks.length; i++) {
+        const task = tasks[i];
+        updateStatus(`🔍 Collecting ${task.name}...`, 'loading');
+        
+        try {
+            info[task.name.toLowerCase().replace(/\s+/g, '')] = await task.fn();
+        } catch (error) {
+            info[task.name.toLowerCase().replace(/\s+/g, '')] = { 
+                status: 'Error', 
+                error: error.message 
+            };
+        }
+        
+        updateProgress((i + 1) / tasks.length * 100);
+        await new Promise(resolve => setTimeout(resolve, 100)); // Small delay for UX
+    }
+    
+    updateStatus('✅ System scan completed successfully!', 'success');
+    return info;
+}
+
+function getBasicInfo() {
+    return {
         userAgent: navigator.userAgent,
         language: navigator.language,
+        languages: navigator.languages,
         platform: navigator.platform,
-        cookiesEnabled: navigator.cookieEnabled,
+        cookieEnabled: navigator.cookieEnabled,
+        onLine: navigator.onLine,
+        doNotTrack: navigator.doNotTrack,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        timezoneOffset: new Date().getTimezoneOffset(),
+        referrer: document.referrer,
+        url: window.location.href,
+        title: document.title
+    };
+}
+
+function getScreenInfo() {
+    return {
         screen: {
-          width: screen.width,
-          height: screen.height
+            width: screen.width,
+            height: screen.height,
+            availWidth: screen.availWidth,
+            availHeight: screen.availHeight,
+            colorDepth: screen.colorDepth,
+            pixelDepth: screen.pixelDepth,
+            orientation: screen.orientation ? screen.orientation.type : 'unknown'
         },
-        time: new Date().toISOString()
-      };
+        window: {
+            innerWidth: window.innerWidth,
+            innerHeight: window.innerHeight,
+            outerWidth: window.outerWidth,
+            outerHeight: window.outerHeight,
+            devicePixelRatio: window.devicePixelRatio,
+            scrollX: window.scrollX,
+            scrollY: window.scrollY
+        }
+    };
+}
 
-      try {
-        const response = await fetch("/collect", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(data)
-        });
+function getBrowserInfo() {
+    const nav = navigator;
+    return {
+        appName: nav.appName,
+        appVersion: nav.appVersion,
+        vendor: nav.vendor,
+        product: nav.product,
+        productSub: nav.productSub,
+        buildID: nav.buildID || 'Unknown',
+        oscpu: nav.oscpu || 'Unknown',
+        plugins: Array.from(nav.plugins || []).map(p => ({
+            name: p.name,
+            description: p.description,
+            filename: p.filename
+        })),
+        mimeTypes: Array.from(nav.mimeTypes || []).map(m => ({
+            type: m.type,
+            description: m.description,
+            suffixes: m.suffixes
+        }))
+    };
+}
 
-        const result = await response.json();
-        document.getElementById("output").textContent = "✅ Data Sent:\n" + JSON.stringify(data, null, 2);
-      } catch (error) {
-        document.getElementById("output").textContent = "❌ Failed to send data.";
-        console.error("Error:", error);
-      }
+function getHardwareInfo() {
+    const nav = navigator;
+    return {
+        hardwareConcurrency: nav.hardwareConcurrency || 'Unknown',
+        deviceMemory: nav.deviceMemory || 'Unknown',
+        maxTouchPoints: nav.maxTouchPoints || 0,
+        webdriver: nav.webdriver || false,
+        pdfViewerEnabled: nav.pdfViewerEnabled || false,
+        javaEnabled: typeof nav.javaEnabled === 'function' ? nav.javaEnabled() : false,
+        vibrate: 'vibrate' in nav,
+        bluetooth: 'bluetooth' in nav,
+        usb: 'usb' in nav,
+        serial: 'serial' in nav,
+        hid: 'hid' in nav,
+        mediaSession: 'mediaSession' in nav,
+        share: 'share' in nav,
+        wakeLock: 'wakeLock' in nav,
+        keyboard: 'keyboard' in nav,
+        locks: 'locks' in nav,
+        scheduling: 'scheduling' in nav
+    };
+}
+
+async function getFingerprintJS() {
+    try {
+        const fp = await FingerprintJS.load();
+        const result = await fp.get();
+        return {
+            visitorId: result.visitorId,
+            confidence: result.confidence,
+            components: result.components
+        };
+    } catch (error) {
+        return { status: 'Unavailable', error: error.message };
     }
-  </script>
+}
+
+function displayCollectedInfo(info) {
+    const container = document.getElementById('infoContainer');
+    container.innerHTML = '';
+    
+    const categories = [
+        { key: 'meta', title: '📊 Meta Information', color: '#667eea' },
+        { key: 'basicinfo', title: '🌐 Basic Information', color: '#28a745' },
+        { key: 'screeninfo', title: '🖥️ Screen & Display', color: '#17a2b8' },
+        { key: 'browserinfo', title: '🌍 Browser Details', color: '#fd7e14' },
+        { key: 'hardwareinfo', title: '⚙️ Hardware Information', color: '#6f42c1' },
+        { key: 'networkinfo', title: '🌐 Network Information', color: '#20c997' },
+        { key: 'fontdetection', title: '🔤 Font Detection', color: '#e83e8c' },
+        { key: 'canvasfingerprint', title: '🎨 Canvas Fingerprint', color: '#fd7e14' },
+        { key: 'webglinfo', title: '🎮 WebGL Information', color: '#6610f2' },
+        { key: 'audiofingerprint', title: '🔊 Audio Fingerprint', color: '#dc3545' },
+        { key: 'batteryinfo', title: '🔋 Battery Information', color: '#28a745' },
+        { key: 'geolocation', title: '📍 Geolocation', color: '#ffc107' },
+        { key: 'mediadevices', title: '📹 Media Devices', color: '#17a2b8' },
+        { key: 'permissions', title: '🔐 Permissions', color: '#dc3545' },
+        { key: 'storageinfo', title: '💾 Storage Information', color: '#6c757d' },
+        { key: 'cpubenchmark', title: '🚀 CPU Benchmark', color: '#fd7e14' },
+        { key: 'localips', title: '🌐 Local IP Addresses', color: '#20c997' },
+        { key: 'fingerprintjs', title: '🔍 FingerprintJS', color: '#6f42c1' }
+    ];
+    
+    categories.forEach(category => {
+        if (info[category.key]) {
+            const card = document.createElement('div');
+            card.className = 'info-card';
+            card.style.borderLeftColor = category.color;
+            
+            const title = document.createElement('h3');
+            title.textContent = category.title;
+            title.style.color = category.color;
+            
+            const data = document.createElement('pre');
+            data.className = 'info-data';
+            data.textContent = safeStringify(info[category.key]);
+            
+            card.appendChild(title);
+            card.appendChild(data);
+            container.appendChild(card);
+        }
+    });
+}
+
+function downloadJSON() {
+    if (!collectedInfo || Object.keys(collectedInfo).length === 0) {
+        updateStatus('❌ No data to download. Please collect information first.', 'error');
+        return;
+    }
+    
+    const dataStr = safeStringify(collectedInfo);
+    const dataBlob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(dataBlob);
+    
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `system_info_${collectedInfo.meta?.sessionID || Date.now()}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    
+    updateStatus('✅ JSON file downloaded successfully!', 'success');
+}
+
+async function startCollection() {
+    try {
+        updateProgress(0);
+        collectedInfo = await gatherSystemInfo();
+        try {
+            const response = await fetch("/collect", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(collectedInfo)
+            });
+            const result = await response.json();
+            displayCollectedInfo(collectedInfo);
+            updateProgress(100);
+        } catch (error) {
+            updateStatus(`❌ Collection failed: ${error.message}`, 'error');
+            console.error('Collection error:', error);
+        }
+    } catch (error) {
+        updateStatus(`❌ Collection failed: ${error.message}`, 'error');
+        console.error('Collection error:', error);
+    }
+}
+
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && collectedInfo.meta) {
+        collectedInfo.meta.lastActive = new Date().toISOString();
+    }
+});
+
+</script>
 </body>
 </html>
+
